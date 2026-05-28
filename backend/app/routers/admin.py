@@ -48,6 +48,23 @@ def update_config(data: dict, admin: User = Depends(require_admin), db: Session 
     return {"message": "配置更新成功"}
 
 
+@router.post("/config")
+def set_config(data: dict, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """设置单个配置项"""
+    key = data.get("key")
+    value = data.get("value")
+    if not key:
+        raise HTTPException(status_code=400, detail="key is required")
+    config = db.query(SystemConfig).filter(SystemConfig.key == key).first()
+    if config:
+        config.value = str(value)
+    else:
+        config = SystemConfig(key=key, value=str(value), description=data.get("description", ""))
+        db.add(config)
+    db.commit()
+    return {"message": "配置保存成功"}
+
+
 @router.get("/dashboard")
 def get_dashboard(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
     from sqlalchemy import func

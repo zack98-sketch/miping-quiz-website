@@ -5,6 +5,7 @@ export const questionApi = {
   getQuestion: (id) => api.get(`/questions/${id}`),
   getStats: () => api.get('/questions/stats'),
   getKnowledgePoints: () => api.get('/questions/knowledge-points'),
+  search: (keyword) => api.get('/questions/search', { params: { keyword } }),
 }
 
 export const quizApi = {
@@ -82,6 +83,8 @@ export const adminApi = {
     })
   },
   getConfig: () => api.get('/admin/config'),
+  getConfigs: () => api.get('/admin/config'),
   updateConfig: (data) => api.put('/admin/config', data),
+  setConfig: (data) => api.post('/admin/config', data),
   getDashboard: () => api.get('/admin/dashboard'),
 }

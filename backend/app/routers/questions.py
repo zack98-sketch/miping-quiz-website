@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from app.database import get_db
 from app.models import Question, Option, QuestionType, Difficulty, User, UserRole
 from app.schemas.question import QuestionResponse, QuestionStats, OptionResponse
@@ -73,6 +73,35 @@ def get_stats(db: Session = Depends(get_db), current_user: User = Depends(get_cu
 def get_knowledge_points(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     kps = db.query(Question.knowledge_point).filter(Question.is_active == True).distinct().all()
     return {"knowledge_points": [kp[0] for kp in kps if kp[0]]}
+
+
+@router.get("/search")
+def search_questions(
+    keyword: str = Query(..., min_length=1),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """模糊搜索题目、答案、解析"""
+    like_pattern = f"%{keyword}%"
+    query = db.query(Question).filter(
+        Question.is_active == True,
+        or_(
+            Question.content.like(like_pattern),
+            Question.correct_answer.like(like_pattern),
+            Question.explanation.like(like_pattern),
+            Question.knowledge_point.like(like_pattern),
+        )
+    )
+    total = query.count()
+    questions = query.offset((page - 1) * page_size).limit(page_size).all()
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": [_question_to_dict(q) for q in questions],
+    }
 
 
 @router.get("/{question_id}")
