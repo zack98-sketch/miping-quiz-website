@@ -151,6 +151,7 @@ def submit_exam(exam_id: int, data: dict, current_user: User = Depends(get_curre
     
     answers = data.get("answers", [])
     correct_count = 0
+    question_results = []
     
     for ans in answers:
         q = db.query(Question).filter(Question.id == ans["question_id"]).first()
@@ -159,6 +160,17 @@ def submit_exam(exam_id: int, data: dict, current_user: User = Depends(get_curre
             is_correct = 1 if _judge_answer(q, ans["answer"]) else 0
             if is_correct:
                 correct_count += 1
+            # Build question result with answer and explanation
+            question_results.append({
+                "id": q.id,
+                "content": q.content,
+                "question_type": q.question_type.value,
+                "options": [{"id": o.id, "label": o.label, "content": o.content} for o in sorted(q.options, key=lambda x: x.sort_order)],
+                "correct_answer": q.correct_answer,
+                "explanation": q.explanation,
+                "user_answer": ans["answer"],
+                "is_correct": bool(is_correct),
+            })
         
         exam_answer = ExamAnswer(
             participation_id=participation.id,
@@ -178,6 +190,8 @@ def submit_exam(exam_id: int, data: dict, current_user: User = Depends(get_curre
         "score": participation.score,
         "correct_count": correct_count,
         "total_count": participation.total_count,
+        "time_spent": participation.time_spent,
+        "questions": question_results,
     }
 
 
