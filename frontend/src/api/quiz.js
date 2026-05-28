@@ -70,8 +70,10 @@ export const examApi = {
 
 export const aiHintApi = {
   request: (data) => api.post('/ai-hint/request', data),
+  chat: (data) => api.post('/ai-hint/chat', data),
   getUsage: () => api.get('/ai-hint/usage'),
   getRemaining: (questionId) => api.get(`/ai-hint/remaining/${questionId}`),
+  getProviders: () => api.get('/ai-hint/providers'),
 }
 
 export const adminApi = {

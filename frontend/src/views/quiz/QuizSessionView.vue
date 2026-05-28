@@ -16,8 +16,8 @@
           <el-tag type="info" size="small" effect="plain">{{ currentQuestion.knowledge_point }}</el-tag>
           <el-tag :type="difficultyTag" size="small" effect="plain">{{ difficultyLabel }}</el-tag>
           <div class="question-actions">
-            <el-tooltip content="AI提示" placement="top">
-              <el-button type="primary" size="small" :icon="'ChatDotRound'" circle @click="showAiHint" />
+            <el-tooltip content="AI智能辅导" placement="top">
+              <el-button type="primary" size="small" :icon="'ChatDotRound'" circle @click="showAiDialog" />
             </el-tooltip>
             <el-tooltip content="添加备注" placement="top">
               <el-button type="success" size="small" :icon="'EditPen'" circle @click="showNoteDialog" />
@@ -100,20 +100,42 @@
         </div>
       </el-card>
 
-      <!-- AI Hint Dialog -->
-      <el-dialog v-model="aiDialogVisible" title="AI 智能提示" width="500px" :append-to-body="true">
-        <div v-if="aiLoading" style="text-align:center;padding:20px">
-          <el-icon class="is-loading" :size="24"><Loading /></el-icon> 正在生成提示...
-        </div>
-        <div v-else-if="aiHintContent" class="ai-hint-content">{{ aiHintContent }}</div>
-        <div v-else style="text-align:center;color:#999;padding:20px">选择提示级别获取帮助</div>
-        <template #footer>
-          <div style="display:flex;gap:10px;justify-content:center">
-            <el-button @click="requestAiHint('light')">轻度提示</el-button>
-            <el-button type="warning" @click="requestAiHint('medium')">中度提示</el-button>
-            <el-button type="danger" @click="requestAiHint('deep')">深度提示</el-button>
+      <!-- AI Chat Dialog -->
+      <el-dialog v-model="aiDialogVisible" title="AI 智能辅导" width="600px" :append-to-body="true" class="ai-dialog" @close="aiMessages = []">
+        <div class="ai-chat-container">
+          <!-- Quick hint buttons -->
+          <div class="ai-quick-actions">
+            <el-button size="small" @click="requestAiHint('light')">💡 轻度提示</el-button>
+            <el-button size="small" type="warning" @click="requestAiHint('medium')">🔍 中度提示</el-button>
+            <el-button size="small" type="danger" @click="requestAiHint('deep')">📚 深度解析</el-button>
           </div>
-        </template>
+          
+          <!-- Chat messages -->
+          <div class="ai-messages" ref="aiMessagesRef">
+            <div v-for="(msg, i) in aiMessages" :key="i" class="ai-message" :class="msg.role">
+              <div class="message-avatar">
+                <el-avatar v-if="msg.role === 'assistant'" :size="32" style="background:#409eff">AI</el-avatar>
+                <el-avatar v-else :size="32" style="background:#67c23a">我</el-avatar>
+              </div>
+              <div class="message-content">
+                <div class="message-text" v-html="formatMessage(msg.content)"></div>
+              </div>
+            </div>
+            <div v-if="aiLoading" class="ai-message assistant">
+              <div class="message-avatar"><el-avatar :size="32" style="background:#409eff">AI</el-avatar></div>
+              <div class="message-content"><div class="message-text"><el-icon class="is-loading"><Loading /></el-icon> 思考中...</div></div>
+            </div>
+          </div>
+          
+          <!-- Input area -->
+          <div class="ai-input-area">
+            <el-input v-model="aiInput" placeholder="输入你的问题，与AI深入讨论..." @keyup.enter="sendAiMessage" :disabled="aiLoading">
+              <template #append>
+                <el-button type="primary" @click="sendAiMessage" :loading="aiLoading" :disabled="!aiInput.trim()">发送</el-button>
+              </template>
+            </el-input>
+          </div>
+        </div>
       </el-dialog>
 
       <!-- Note Dialog -->
@@ -129,7 +151,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { quizApi, favoriteApi, aiHintApi, noteApi } from '../../api/quiz'
 import { ElMessage } from 'element-plus'
@@ -149,10 +171,14 @@ const selectedAnswer = ref('')
 const selectedMultiAnswer = ref([])
 const elapsedTime = ref(0)
 const questionStartTime = ref(Date.now())
-// AI hint
+
+// AI Chat
 const aiDialogVisible = ref(false)
 const aiLoading = ref(false)
-const aiHintContent = ref('')
+const aiMessages = ref([])
+const aiInput = ref('')
+const aiMessagesRef = ref(null)
+
 // Note
 const noteDialogVisible = ref(false)
 const noteContent = ref('')
@@ -220,6 +246,8 @@ async function loadCurrentQuestion() {
       const noteRes = await noteApi.getByQuestion(currentQuestion.value.id)
       noteContent.value = noteRes.note?.content || ''
     } catch {}
+    // Reset AI chat
+    aiMessages.value = []
   } catch (e) {
     ElMessage.error(e.detail || '加载题目失败')
   } finally {
@@ -258,11 +286,7 @@ function nextQuestion() {
 }
 
 function prevQuestion() {
-  // Navigate to previous question by adjusting the session's current_index
-  // We need a backend endpoint or workaround - for now we reload and skip
   if (currentIndex.value > 0) {
-    // Simple approach: just reload current (backend tracks index)
-    // We'll add a proper prev endpoint later
     ElMessage.info('已提交的答案无法返回修改')
   }
 }
@@ -283,9 +307,8 @@ async function toggleFavorite() {
   }
 }
 
-// AI Hint
-function showAiHint() {
-  aiHintContent.value = ''
+// AI Chat
+function showAiDialog() {
   aiDialogVisible.value = true
 }
 
@@ -294,12 +317,77 @@ async function requestAiHint(level) {
   aiLoading.value = true
   try {
     const res = await aiHintApi.request({ question_id: currentQuestion.value.id, level })
-    aiHintContent.value = res.hint_content
+    aiMessages.value.push({ role: 'assistant', content: res.hint_content })
+    scrollToBottom()
   } catch (e) {
-    aiHintContent.value = e.detail || '提示服务暂不可用'
+    aiMessages.value.push({ role: 'assistant', content: e.detail || '提示服务暂不可用' })
   } finally {
     aiLoading.value = false
   }
+}
+
+async function sendAiMessage() {
+  if (!aiInput.value.trim() || aiLoading.value) return
+  const userMessage = aiInput.value.trim()
+  aiInput.value = ''
+  
+  aiMessages.value.push({ role: 'user', content: userMessage })
+  aiLoading.value = true
+  
+  try {
+    // Build context with question info
+    const systemPrompt = buildSystemPrompt()
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      ...aiMessages.value.map(m => ({ role: m.role, content: m.content }))
+    ]
+    
+    const res = await aiHintApi.chat({
+      question_id: currentQuestion.value.id,
+      messages: messages
+    })
+    aiMessages.value.push({ role: 'assistant', content: res.content })
+    scrollToBottom()
+  } catch (e) {
+    aiMessages.value.push({ role: 'assistant', content: e.detail || 'AI服务暂时不可用' })
+  } finally {
+    aiLoading.value = false
+  }
+}
+
+function buildSystemPrompt() {
+  const q = currentQuestion.value
+  const options = q.options?.map(o => `${o.label}. ${o.content}`).join('\n') || ''
+  return `你是一个专业的密码学考试辅导老师。当前题目信息如下：
+
+【题目】${q.content}
+
+【选项】
+${options}
+
+【知识点】${q.knowledge_point || '密码学'}
+
+请根据学生的问题给出专业、耐心的解答。注意：
+1. 不要直接给出答案，要引导学生思考
+2. 解释要清晰易懂，结合具体概念
+3. 如果学生问的是相关知识点，可以适当拓展
+4. 用中文回答，语言简洁专业`
+}
+
+function formatMessage(content) {
+  // Simple markdown-like formatting
+  return content
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n/g, '<br>')
+    .replace(/- (.*?)(?=<br>|$)/g, '• $1')
+}
+
+function scrollToBottom() {
+  nextTick(() => {
+    if (aiMessagesRef.value) {
+      aiMessagesRef.value.scrollTop = aiMessagesRef.value.scrollHeight
+    }
+  })
 }
 
 // Note
@@ -352,18 +440,12 @@ function isWrongOption(opt) {
 .question-number { font-weight: bold; color: #e94560; margin-right: 4px; }
 .options-area { margin-bottom: 20px; }
 .option-group { display: flex; flex-direction: column; gap: 10px; width: 100%; }
-.option-item {
-  padding: 14px 18px; border: 2px solid #e8e8e8; border-radius: 10px; transition: all 0.25s;
-  width: 100%; display: flex; align-items: flex-start; min-height: 48px;
-}
+.option-item { padding: 14px 18px; border: 2px solid #e8e8e8; border-radius: 10px; transition: all 0.25s; width: 100%; display: flex; align-items: flex-start; min-height: 48px; }
 .option-item:hover { border-color: #e94560; background: rgba(233,69,96,0.04); transform: translateX(4px); }
 .option-label { font-weight: bold; color: #e94560; margin-right: 8px; flex-shrink: 0; min-width: 24px; }
 .option-text { flex: 1; line-height: 1.6; }
 .answered-options { display: flex; flex-direction: column; gap: 8px; }
-.answered-option {
-  padding: 14px 18px; border: 2px solid #e8e8e8; border-radius: 10px;
-  display: flex; align-items: flex-start; min-height: 48px; transition: all 0.2s;
-}
+.answered-option { padding: 14px 18px; border: 2px solid #e8e8e8; border-radius: 10px; display: flex; align-items: flex-start; min-height: 48px; transition: all 0.2s; }
 .answered-option.correct-option { background: #f0f9eb; border-color: #67c23a; }
 .answered-option.wrong-option { background: #fef0f0; border-color: #f56c6c; }
 .option-icon { margin-left: auto; flex-shrink: 0; }
@@ -376,7 +458,19 @@ function isWrongOption(opt) {
 .explanation { color: #666; line-height: 1.8; padding-top: 8px; border-top: 1px dashed #ddd; }
 .action-area { display: flex; justify-content: center; gap: 12px; padding-top: 10px; }
 .action-area .el-button { min-width: 140px; }
-.ai-hint-content { line-height: 1.8; color: #333; padding: 10px; background: #f0f5ff; border-radius: 8px; border-left: 3px solid #409eff; }
+
+/* AI Chat */
+.ai-chat-container { display: flex; flex-direction: column; height: 500px; }
+.ai-quick-actions { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.ai-messages { flex: 1; overflow-y: auto; padding: 12px; background: #f5f7fa; border-radius: 8px; margin-bottom: 12px; }
+.ai-message { display: flex; gap: 10px; margin-bottom: 16px; }
+.ai-message.user { flex-direction: row-reverse; }
+.message-avatar { flex-shrink: 0; }
+.message-content { flex: 1; max-width: 80%; }
+.message-text { padding: 10px 14px; border-radius: 12px; line-height: 1.6; font-size: 14px; }
+.ai-message.assistant .message-text { background: #fff; border: 1px solid #e4e7ed; }
+.ai-message.user .message-text { background: #409eff; color: #fff; }
+.ai-input-area { flex-shrink: 0; }
 
 @media (max-width: 768px) {
   .quiz-session { padding: 0 4px; }
@@ -387,5 +481,6 @@ function isWrongOption(opt) {
   .action-area .el-button { min-width: 100px; flex: 1; }
   .question-actions { margin-left: 0; }
   .question-header { gap: 6px; }
+  .ai-chat-container { height: 400px; }
 }
 </style>
